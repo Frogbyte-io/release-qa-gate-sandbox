@@ -10,7 +10,7 @@ on:
       requirement:
         required: true
       refresh:
-        description: edit | dispatch
+        description: edit | dispatch | rerun
         required: true
         default: edit
 permissions:
@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       PR: ${{ inputs.pr_number }}
     steps:
       - name: Upload report
@@ -39,6 +40,11 @@ jobs:
             body=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .body)
             gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" -X PATCH -f body="$body
           <!-- qa:refresh=actions-$GITHUB_RUN_ID -->" --jq .updated_at
+          elif [ "${{ inputs.refresh }}" = "rerun" ]; then
+            head_sha=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
+            run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/qa-gate.yml/runs?event=pull_request&head_sha=$head_sha&per_page=1" --jq ".workflow_runs[0].id")
+            echo "rerunning qa-gate run $run_id for $head_sha"
+            gh run rerun "$run_id"
           else
             gh workflow run qa-gate.yml --ref "$head_ref" -f pr_number="$PR"
           fi
