@@ -28,8 +28,10 @@ if (event.pull_request && event.pull_request.head.sha !== pr.head.sha) {
   finish(false, `obsolete evaluation: event head ${event.pull_request.head.sha} is not current head ${pr.head.sha}`);
 }
 
+const baseTip = gh(`repos/${repo}/branches/${pr.base.ref}`).commit.sha;
+say(`- current tip of ${pr.base.ref}: ${baseTip}${baseTip === pr.base.sha ? '' : ' (PR base.sha is stale)'}`);
 const policy = JSON.parse(
-  Buffer.from(gh(`repos/${repo}/contents/qa/policy.json?ref=${pr.base.sha}`).content, 'base64').toString(),
+  Buffer.from(gh(`repos/${repo}/contents/qa/policy.json?ref=${baseTip}`).content, 'base64').toString(),
 );
 const isRelease =
   pr.head.ref.startsWith(policy.releaseBranchPrefix) ||
@@ -47,6 +49,9 @@ const candidateAsset = draft.assets.find((a) => a.name === 'candidate.json');
 if (!candidateAsset) finish(false, 'manual check required: no active candidate selected');
 const candidate = assetJson(candidateAsset);
 say(`- candidate ${candidate.id} for source ${candidate.sourceSha}`);
+if (candidate.baseSha !== baseTip) {
+  finish(false, `target branch moved: candidate base ${candidate.baseSha}, current ${baseTip}; prepare a new candidate`);
+}
 if (candidate.sourceSha !== pr.head.sha) {
   finish(false, `candidate was prepared for ${candidate.sourceSha}, current head is ${pr.head.sha}`);
 }
