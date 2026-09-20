@@ -1,0 +1,19 @@
+name: qa-gate
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited, labeled, unlabeled]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  release-qa:
+    name: release-qa
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Evaluate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/qa-evaluate.mjs
