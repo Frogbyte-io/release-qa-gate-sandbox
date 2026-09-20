@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       PR: ${{ inputs.pr_number }}
     steps:
       - name: Upload report
