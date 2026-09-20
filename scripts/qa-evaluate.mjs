@@ -36,8 +36,8 @@ const isRelease =
   pr.labels.some((l) => l.name === policy.releaseLabel);
 if (!isRelease) finish(true, 'not a release PR; normal policy applies');
 
-const releases = gh(`repos/${repo}/releases?per_page=100`, '--paginate').flat?.() ?? [];
-const draft = (Array.isArray(releases) ? releases : []).find((r) => r.draft && r.name === `QA PR #${prNumber}`);
+const releases = gh(`repos/${repo}/releases?per_page=100`);
+const draft = releases.find((r) => r.draft && r.name === `QA PR #${prNumber}`);
 if (!draft) finish(false, 'manual check required: no candidate release record for this PR');
 
 const assetJson = (asset) =>
