@@ -13,4 +13,3 @@ npm run package:linux   # .deb on Linux
 ```
 
 The `game-ci` workflow packages both platforms on pull requests and `main`. Those CI artifacts prove that distributables can be built; they are not yet selected Release QA candidates. Candidate preparation will use a separate trusted workflow, verify the exact packaged bytes, and select a candidate only after both files are staged and checked.
-note

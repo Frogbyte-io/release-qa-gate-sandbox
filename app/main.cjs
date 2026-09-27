@@ -4,9 +4,6 @@ const { readBest, saveBest } = require('./score.cjs');
 
 app.setAppUserModelId('io.frogbyte.orbit-orchard');
 
-ipcMain.handle('score:read', () => readBest(app.getPath('userData')));
-ipcMain.handle('score:save', (_event, score) => saveBest(app.getPath('userData'), score));
-
 function createWindow() {
   const window = new BrowserWindow({
     title: 'Orbit Orchard',
@@ -25,9 +22,20 @@ function createWindow() {
   window.loadFile(join(__dirname, 'index.html'));
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-});
-
-app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  // Only one process may update the best-score file; IPC writes are synchronous within it.
+  ipcMain.handle('score:read', () => readBest(app.getPath('userData')));
+  ipcMain.handle('score:save', (_event, score) => saveBest(app.getPath('userData'), score));
+  app.on('second-instance', () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window?.isMinimized()) window.restore();
+    window?.focus();
+  });
+  app.whenReady().then(() => {
+    createWindow();
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  });
+  app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+}

@@ -21,6 +21,8 @@ test('corrupt score file fails closed and invalid scores are rejected', () => {
   try {
     writeFileSync(join(dir, 'score.json'), '{broken');
     assert.equal(readBest(dir), 0);
+    writeFileSync(join(dir, 'score.json'), 'null');
+    assert.equal(readBest(dir), 0);
     assert.throws(() => saveBest(dir, -1));
     assert.throws(() => saveBest(dir, 1.5));
   } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -13,7 +13,7 @@ export function collect(round, index, random = Math.random) {
   const other = cell(random, CELL_COUNT - 1);
   return {
     ...round,
-    score: round.score + (round.streak > 0 && round.streak % 3 === 0 ? 2 : 1),
+    score: round.score + ((round.streak + 1) % 3 === 0 ? 2 : 1),
     streak: round.streak + 1,
     target: other >= round.target ? other + 1 : other,
   };

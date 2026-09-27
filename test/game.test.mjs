@@ -30,6 +30,8 @@ test('a round ends at zero and cannot score afterward', () => {
 
 test('a three-star streak earns a bonus', () => {
   let round = beginRound(() => 0);
-  for (let star = 0; star < 4; star += 1) round = collect(round, round.target, () => 0);
+  for (let star = 0; star < 3; star += 1) round = collect(round, round.target, () => 0);
+  assert.equal(round.score, 4);
+  round = collect(round, round.target, () => 0);
   assert.equal(round.score, 5);
 });

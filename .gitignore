@@ -1,4 +1,3 @@
-node_modules/
-dist/
-.playwright-cli/
-*.log
+/node_modules/
+/dist/
+/.playwright-cli/

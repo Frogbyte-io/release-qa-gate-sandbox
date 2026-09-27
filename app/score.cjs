@@ -4,7 +4,7 @@ const { join } = require('node:path');
 function readBest(directory) {
   try {
     const value = JSON.parse(readFileSync(join(directory, 'score.json'), 'utf8'));
-    return Number.isSafeInteger(value.best) && value.best >= 0 ? value.best : 0;
+    return value && typeof value === 'object' && Number.isSafeInteger(value.best) && value.best >= 0 ? value.best : 0;
   } catch (error) {
     if (error.code === 'ENOENT' || error instanceof SyntaxError) return 0;
     throw error;
