@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+    <title>Orbit Orchard</title>
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <span class="eyebrow">A tiny cosmic arcade</span>
+        <h1>Orbit <em>Orchard</em></h1>
+        <p>Gather the glowing stars before the night slips away. Every three in a row lights up a bonus.</p>
+      </header>
+
+      <section class="dashboard" aria-label="Game scores">
+        <div><span>Tonight</span><strong id="score">0</strong></div>
+        <div><span>Best harvest</span><strong id="best">0</strong></div>
+        <div><span>Time left</span><strong id="time">30s</strong></div>
+      </section>
+
+      <section class="playfield" aria-label="Orbit Orchard game">
+        <div class="field-heading">
+          <span id="message" role="status" aria-live="polite">Ready when you are, stargazer.</span>
+          <span id="streak" class="streak">✦ 0 streak</span>
+        </div>
+        <div id="grid" class="grid" role="group" aria-label="Star field"></div>
+        <div class="actions">
+          <button id="start" class="start" type="button">Start a 30-second round</button>
+          <span>Click or use Tab + Enter to collect each glowing star.</span>
+        </div>
+      </section>
+      <footer>Made for Release QA • Same game, exact packaged bytes.</footer>
+    </main>
+    <script type="module" src="renderer.mjs"></script>
+  </body>
+</html>
