@@ -23,7 +23,20 @@ test('corrupt score file fails closed and invalid scores are rejected', () => {
     assert.equal(readBest(dir), 0);
     writeFileSync(join(dir, 'score.json'), 'null');
     assert.equal(readBest(dir), 0);
+    writeFileSync(join(dir, 'score.json'), '{"best":-3}');
+    assert.equal(readBest(dir), 0);
+    writeFileSync(join(dir, 'score.json'), '{"best":9007199254740992}');
+    assert.equal(readBest(dir), 0);
     assert.throws(() => saveBest(dir, -1));
     assert.throws(() => saveBest(dir, 1.5));
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('first save creates the app data directory', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orbit-score-'));
+  try {
+    const directory = join(root, 'new-user-data');
+    assert.equal(saveBest(directory, 3), 3);
+    assert.equal(readBest(directory), 3);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
