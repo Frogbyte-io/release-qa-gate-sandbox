@@ -24,6 +24,6 @@
     "artifactName": "Orbit-Orchard-${version}-${os}-${arch}.${ext}",
     "win": { "target": "nsis", "signAndEditExecutable": false },
     "nsis": { "oneClick": false, "perMachine": false },
-    "linux": { "target": "deb", "category": "Game" }
+    "linux": { "target": "deb", "category": "Game", "maintainer": "Release QA Sandbox <noreply@example.com>" }
   }
 }
