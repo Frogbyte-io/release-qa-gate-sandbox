@@ -69,9 +69,10 @@ jobs:
       - name: Upload brokered release snapshot
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-qa-broker-snapshot-${{ github.run_attempt }}
+          name: release-qa-broker-snapshot-${{ github.run_id }}
           path: brokered-release/release.json
           if-no-files-found: error
+          overwrite: true
 
   evaluate:
     name: trusted-evaluator
@@ -100,7 +101,7 @@ jobs:
       - name: Download brokered release snapshot
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: release-qa-broker-snapshot-${{ github.run_attempt }}
+          name: release-qa-broker-snapshot-${{ github.run_id }}
           path: .release-qa-broker
       - name: Prepare evaluator result directory
         run: mkdir -p .release-qa-result
@@ -117,9 +118,10 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: release-qa-gate-result-${{ github.run_attempt }}
+          name: release-qa-gate-result-${{ github.run_id }}
           path: .release-qa-result/result.json
           if-no-files-found: warn
+          overwrite: true
 
   finalize:
     name: trusted-finalizer
@@ -147,7 +149,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: release-qa-gate-result-${{ github.run_attempt }}
+          name: release-qa-gate-result-${{ github.run_id }}
           path: .release-qa-result
       - name: Verify live identities and publish required status
         env:
