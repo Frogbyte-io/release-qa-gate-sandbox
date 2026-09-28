@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: 4dbbf81f3b49ca84860190e97ca4d177c57bde57
+          ref: fd563c46cb99caec52c4f4fc53768d3f70e579cb
           path: .release-qa
           persist-credentials: false
       - name: Download brokered release snapshot
