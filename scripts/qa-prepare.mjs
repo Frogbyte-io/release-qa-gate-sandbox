@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { packageName, releaseVersion } from './qa-source.mjs';
 
 const { GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: runId, GITHUB_RUN_ATTEMPT: attempt,
   GITHUB_SHA: workflowHeadSha, PR_NUMBER: numberText, EXPECTED_HEAD: sourceSha,
@@ -43,11 +44,13 @@ function assertCurrent() {
   const bytes = Buffer.from(json(path(`contents/qa/policy.json?ref=${baseSha}`)).content, 'base64');
   if (hash(bytes) !== policyDigest) throw new Error('Trusted policy changed');
   const policy = JSON.parse(bytes.toString('utf8'));
+  const sourceFile = (name) => Buffer.from(json(path(`contents/${name}?ref=${sourceSha}`)).content, 'base64').toString('utf8');
+  const version = releaseVersion(sourceFile('VERSION'), sourceFile('package.json'));
   const changed = list(path(`pulls/${prNumber}/files?per_page=100`)).map((entry) => entry.filename);
   if (!pr.head.ref.startsWith(policy.releaseBranchPrefix) &&
       !pr.labels.some((label) => label.name === policy.releaseLabel) &&
       !changed.some((name) => policy.releaseFiles.includes(name))) throw new Error('No trusted release intent');
-  return { repository, pr };
+  return { repository, pr, version };
 }
 
 function draftRelease() {
@@ -79,7 +82,7 @@ function invalidate() {
 }
 
 function select() {
-  const { repository } = assertCurrent();
+  const { repository, version } = assertCurrent();
   const release = draftRelease();
   if (!release || release.assets.some((asset) => asset.name === 'candidate.json')) throw new Error('Selection was not withdrawn');
   const run = json(path(`actions/runs/${runId}`));
@@ -90,7 +93,8 @@ function select() {
   }
   const actions = list(path(`actions/runs/${runId}/artifacts?per_page=100`), '.artifacts[]');
   const artifacts = [];
-  for (const [profile, suffix] of [['windows', '.exe'], ['linux', '.deb']]) {
+  for (const profile of ['windows', 'linux']) {
+    const filename = packageName(profile, version);
     const action = actions.find((item) => item.name === `candidate-${profile}` && !item.expired);
     if (!action) throw new Error(`Missing ${profile} Actions artifact`);
     const origin = json(path(`actions/artifacts/${action.id}`)).workflow_run;
@@ -98,8 +102,8 @@ function select() {
       throw new Error(`Wrong ${profile} Actions artifact origin`);
     }
     const directory = join('candidate-files', `candidate-${profile}`);
-    const names = readdirSync(directory).filter((name) => name.endsWith(suffix));
-    if (names.length !== 1 || !/^Orbit-Orchard-[A-Za-z0-9.-]+\.(exe|deb)$/.test(names[0])) throw new Error(`Expected one ${profile} package`);
+    const names = readdirSync(directory);
+    if (names.length !== 1 || names[0] !== filename) throw new Error(`Expected exact ${profile} package ${filename}`);
     const name = `${candidateId}-${names[0]}`;
     const file = join(directory, names[0]);
     const sha256 = hash(readFileSync(file));
