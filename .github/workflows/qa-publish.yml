@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: 2ec6025b6f46a004260cc9d908d64c397aed8c07
+          ref: 001148afa8b56bc6b214459633b421e53beb5fac
           path: .release-qa
           persist-credentials: false
       - name: Reevaluate and publish the tested candidate
