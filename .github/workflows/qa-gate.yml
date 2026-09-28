@@ -5,7 +5,8 @@ on:
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
 
 permissions:
-  contents: read
+  # GitHub exposes draft releases only when the workflow token has write access.
+  contents: write
   pull-requests: read
   statuses: write
 
