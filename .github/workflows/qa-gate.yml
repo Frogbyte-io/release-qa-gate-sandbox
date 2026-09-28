@@ -14,9 +14,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  locate-candidate-release:
+    name: locate-candidate-release
+    runs-on: ubuntu-24.04
+    outputs:
+      release_id: ${{ steps.lookup.outputs.release_id }}
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Locate the draft candidate release
+        id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid pull request number" >&2
+            exit 1
+          fi
+          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")] | first | .id // empty")"
+          if [[ -n "$release_id" ]] && ! [[ "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Invalid draft release id" >&2
+            exit 1
+          fi
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
   evaluate:
     name: trusted-evaluator
     runs-on: ubuntu-24.04
+    needs: locate-candidate-release
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
     steps:
       - name: Check out trusted consumer configuration
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -31,7 +64,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: f827456ef51397d95de2f4b09c1584c53f513fab
+          ref: 3f08ac853253d47a3fa61ba0c9d40d861924ddb2
           path: .release-qa
           persist-credentials: false
       - name: Evaluate current PR and publish required status
@@ -42,4 +75,5 @@ jobs:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
+          RELEASE_QA_RELEASE_ID: ${{ needs.locate-candidate-release.outputs.release_id }}
         run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-cli.ts
