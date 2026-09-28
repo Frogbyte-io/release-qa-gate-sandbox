@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "projectId": "orbit-orchard",
+  "releaseBranch": "main",
+  "profiles": [
+    { "id": "windows", "os": "windows", "arch": "x86_64" },
+    { "id": "linux", "os": "linux", "arch": "x86_64" }
+  ],
+  "requirements": [
+    { "key": "windows/persistence", "mode": "manual", "title": "Best score survives app restart", "capabilities": ["display"] },
+    { "key": "windows/device-feel", "mode": "manual", "title": "Packaged game plays smoothly", "capabilities": ["display"] }
+  ],
+  "suites": [],
+  "scenarioFiles": [],
+  "lifecycleModule": "qa/lifecycle.mjs",
+  "workflows": { "prepare": "qa-prepare.yml", "gate": "qa-gate.yml", "publish": "qa-publish.yml" },
+  "markers": { "releaseNotes": "release-notes", "qa": "release-qa" }
+}
