@@ -1,24 +1,163 @@
-name: qa-gate
+name: qa-gate-trusted
+
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize, edited, labeled, unlabeled]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: Pull request to evaluate (dispatch on the PR head ref)
-        required: true
+
 permissions:
-  contents: write
+  contents: read
   pull-requests: read
+  statuses: write
+
+concurrency:
+  group: release-qa-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
 jobs:
-  release-qa:
-    name: release-qa
-    runs-on: ubuntu-latest
+  locate-candidate-release:
+    name: locate-candidate-release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.base.ref || 'main' }}
-      - name: Evaluate
+      - name: Resolve release metadata and broker QA records
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/qa-evaluate.mjs
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import subprocess
+
+          repository = os.environ['GITHUB_REPOSITORY']
+          pr_number = os.environ['PR_NUMBER']
+          if not re.fullmatch(r'[1-9][0-9]*', pr_number):
+              raise SystemExit('Invalid pull request number')
+
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', '--paginate', '--slurp',
+              f'repos/{repository}/releases?per_page=100',
+          ]))
+          releases = [release for page in pages for release in page]
+          release = next((item for item in releases if item.get('draft') is True and item.get('name') == f'QA PR #{pr_number}'), None)
+          if release is not None:
+              brokered_assets = {}
+              for asset in release.get('assets', []):
+                  name = asset.get('name', '')
+                  needed = (name == 'candidate.json' or name.startswith((
+                      'report-', 'qa-report-', 'qa-event-', 'qa-evidence-', 'qa-claim-', 'qa-retry-resolution-'
+                  )) or re.match(r'^(qa-)?exception-', name))
+                  if not needed or asset.get('state') != 'uploaded':
+                      continue
+                  content = subprocess.check_output([
+                      'gh', 'api', '-H', 'Accept: application/octet-stream',
+                      f"repos/{repository}/releases/assets/{asset['id']}",
+                  ])
+                  brokered_assets[str(asset['id'])] = base64.b64encode(content).decode('ascii')
+              release['brokeredAssets'] = brokered_assets
+
+          os.makedirs('brokered-release', exist_ok=True)
+          with open('brokered-release/release.json', 'w', encoding='utf-8') as target:
+              json.dump(release or {}, target, separators=(',', ':'))
+          PY
+      - name: Upload brokered release snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-qa-broker-snapshot-${{ github.run_id }}
+          path: brokered-release/release.json
+          if-no-files-found: error
+          overwrite: true
+
+  evaluate:
+    name: trusted-evaluator
+    runs-on: ubuntu-24.04
+    needs: locate-candidate-release
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted consumer configuration
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.18.0
+      - name: Check out the public Release QA evaluator
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          ref: c94e528a7e2e2ffbb50c5192703c27fc2d955469
+          path: .release-qa
+          persist-credentials: false
+      - name: Download brokered release snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-qa-broker-snapshot-${{ github.run_id }}
+          path: .release-qa-broker
+      - name: Prepare evaluator result directory
+        run: mkdir -p .release-qa-result
+      - name: Evaluate current PR without publishing status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          RELEASE_QA_RELEASE_SNAPSHOT_FILE: .release-qa-broker/release.json
+          RELEASE_QA_DEFER_FINALIZATION_FILE: .release-qa-result/result.json
+        run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-cli.ts
+      - name: Upload deferred evaluator result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-qa-gate-result-${{ github.run_id }}
+          path: .release-qa-result/result.json
+          if-no-files-found: warn
+          overwrite: true
+
+  finalize:
+    name: trusted-finalizer
+    runs-on: ubuntu-24.04
+    needs: [locate-candidate-release, evaluate]
+    if: always()
+    permissions:
+      contents: write
+      pull-requests: read
+      statuses: write
+    steps:
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.18.0
+      - name: Check out the public Release QA finalizer
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          ref: c94e528a7e2e2ffbb50c5192703c27fc2d955469
+          path: .release-qa
+          persist-credentials: false
+      - name: Download deferred evaluator result
+        if: always()
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-qa-gate-result-${{ github.run_id }}
+          path: .release-qa-result
+      - name: Verify live identities and publish required status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          RELEASE_QA_DEFERRED_RESULT_FILE: .release-qa-result/result.json
+        run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-finalize-cli.ts

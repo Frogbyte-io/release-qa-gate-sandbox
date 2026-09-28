@@ -1,12 +1,55 @@
 name: qa-publish
+
 on:
+  pull_request_target:
+    types: [closed]
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged release PR number
+        required: true
+        type: string
+      expected_head:
+        description: Tested PR head SHA captured before app merge
+        required: true
+        type: string
+      notes_asset_id:
+        description: Candidate draft asset ID containing notes saved before app merge
+        required: true
+        type: string
+
 permissions: {}
+
+concurrency:
+  group: qa-publish-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: false
+
 jobs:
-  unavailable:
+  publish:
+    if: github.event.pull_request.merged == true || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
     steps:
-      - name: Block publication until Release QA Stage 4 is implemented
-        run: |
-          echo 'Sandbox publication is not implemented; selected candidates remain draft-only.' >&2
-          exit 1
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.18.0
+      - name: Check out trusted Release QA publisher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          ref: c94e528a7e2e2ffbb50c5192703c27fc2d955469
+          path: .release-qa
+          persist-credentials: false
+      - name: Reevaluate and publish the tested candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_EVENT_PATH: ${{ github.event_path }}
+          GITHUB_REF: ${{ github.ref }}
+        run: node --experimental-strip-types .release-qa/packages/qa/src/github/publish-cli.ts
