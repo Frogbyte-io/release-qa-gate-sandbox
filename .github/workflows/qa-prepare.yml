@@ -1,0 +1,102 @@
+name: qa-prepare
+run-name: "qa-prepare PR #${{ inputs.pr_number }} ${{ inputs.expected_head }}"
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      expected_head:
+        required: true
+        type: string
+      expected_base:
+        required: true
+        type: string
+      policy_digest:
+        required: true
+        type: string
+permissions: {}
+concurrency:
+  group: qa-prepare-pr-${{ inputs.pr_number }}
+  cancel-in-progress: false
+jobs:
+  invalidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate and withdraw active selection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          POLICY_DIGEST: ${{ inputs.policy_digest }}
+        run: node scripts/qa-prepare.mjs invalidate
+  package:
+    needs: invalidate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2025
+            profile: windows
+            command: package:windows
+            pattern: dist/Orbit-Orchard-*.exe
+          - os: ubuntu-24.04
+            profile: linux
+            command: package:linux
+            pattern: dist/Orbit-Orchard-*.deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.expected_head }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run ${{ matrix.command }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: candidate-${{ matrix.profile }}
+          path: ${{ matrix.pattern }}
+          if-no-files-found: error
+  select:
+    if: github.ref == 'refs/heads/main'
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: candidate-*
+          path: candidate-files
+      - name: Verify and select exact packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD: ${{ inputs.expected_head }}
+          EXPECTED_BASE: ${{ inputs.expected_base }}
+          POLICY_DIGEST: ${{ inputs.policy_digest }}
+        run: node scripts/qa-prepare.mjs select
