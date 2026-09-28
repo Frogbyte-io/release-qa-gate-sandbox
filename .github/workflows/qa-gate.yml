@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       release_id: ${{ steps.lookup.outputs.release_id }}
+      release_snapshot_b64: ${{ steps.lookup.outputs.release_snapshot_b64 }}
     permissions:
       contents: write
       pull-requests: read
@@ -40,7 +41,12 @@ jobs:
             echo "Invalid draft release id" >&2
             exit 1
           fi
+          release_snapshot_b64="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")][0] | @base64")"
+          if [[ "$release_snapshot_b64" == "bnVsbA==" ]]; then
+            release_snapshot_b64=""
+          fi
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release_snapshot_b64=$release_snapshot_b64" >> "$GITHUB_OUTPUT"
 
   evaluate:
     name: trusted-evaluator
@@ -76,4 +82,5 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           RELEASE_QA_RELEASE_ID: ${{ needs.locate-candidate-release.outputs.release_id }}
+          RELEASE_QA_RELEASE_SNAPSHOT_B64: ${{ needs.locate-candidate-release.outputs.release_snapshot_b64 }}
         run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-cli.ts
