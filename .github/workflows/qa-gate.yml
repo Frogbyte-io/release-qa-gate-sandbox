@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       release_id: ${{ steps.lookup.outputs.release_id }}
+      release_snapshot_b64: ${{ steps.lookup.outputs.release_snapshot_b64 }}
     permissions:
       contents: write
       pull-requests: read
@@ -35,12 +36,17 @@ jobs:
             echo "Invalid pull request number" >&2
             exit 1
           fi
-          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")] | first | .id // empty")"
-          if [[ -n "$release_id" ]] && ! [[ "$release_id" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Invalid draft release id" >&2
-            exit 1
+          release_snapshot_b64="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")][0] | if . == null then empty else @base64 end")"
+          release_id=""
+          if [[ -n "$release_snapshot_b64" ]]; then
+            release_id="$(printf '%s' "$release_snapshot_b64" | base64 --decode | jq -r '.id // empty')"
+            if ! [[ "$release_id" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Invalid draft release id" >&2
+              exit 1
+            fi
           fi
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+          echo "release_snapshot_b64=$release_snapshot_b64" >> "$GITHUB_OUTPUT"
 
   evaluate:
     name: trusted-evaluator
@@ -64,7 +70,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: 3f08ac853253d47a3fa61ba0c9d40d861924ddb2
+          ref: 4dbbf81f3b49ca84860190e97ca4d177c57bde57
           path: .release-qa
           persist-credentials: false
       - name: Evaluate current PR and publish required status
@@ -76,4 +82,5 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           RELEASE_QA_RELEASE_ID: ${{ needs.locate-candidate-release.outputs.release_id }}
+          RELEASE_QA_RELEASE_SNAPSHOT_B64: ${{ needs.locate-candidate-release.outputs.release_snapshot_b64 }}
         run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-cli.ts
