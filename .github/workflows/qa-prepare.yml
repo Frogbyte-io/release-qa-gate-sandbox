@@ -1,5 +1,5 @@
 name: qa-prepare
-run-name: qa-prepare PR #${{ inputs.pr_number }} ${{ inputs.expected_head }}
+run-name: "qa-prepare PR #${{ inputs.pr_number }} ${{ inputs.expected_head }}"
 on:
   workflow_dispatch:
     inputs:
