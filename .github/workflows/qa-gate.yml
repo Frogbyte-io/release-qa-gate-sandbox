@@ -64,7 +64,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: f827456ef51397d95de2f4b09c1584c53f513fab
+          ref: 3f08ac853253d47a3fa61ba0c9d40d861924ddb2
           path: .release-qa
           persist-credentials: false
       - name: Evaluate current PR and publish required status
