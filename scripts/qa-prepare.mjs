@@ -78,7 +78,10 @@ function select() {
   if (!release || release.assets.some((asset) => asset.name === 'candidate.json')) throw new Error('Selection was not withdrawn');
   const run = json(path(`actions/runs/${runId}`));
   if (run.path !== '.github/workflows/qa-prepare.yml' || run.head_sha !== workflowHeadSha ||
-      run.repository.id !== repository.id || run.run_attempt !== Number(attempt)) throw new Error('Wrong preparation workflow run');
+      run.repository.id !== repository.id || run.run_attempt !== Number(attempt) ||
+      run.event !== 'workflow_dispatch' || run.display_title !== `qa-prepare PR #${prNumber} ${sourceSha}`) {
+    throw new Error('Wrong preparation workflow run or source binding');
+  }
   const actions = list(path(`actions/runs/${runId}/artifacts?per_page=100`));
   const artifacts = [];
   for (const [profile, suffix] of [['windows', '.exe'], ['linux', '.deb']]) {
