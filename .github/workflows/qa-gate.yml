@@ -36,7 +36,8 @@ jobs:
             echo "Invalid pull request number" >&2
             exit 1
           fi
-          release_snapshot_b64="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")][0] | if . == null then empty else @base64 end")"
+          all_release_snapshots="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")][0] | if . == null then empty else @base64 end")"
+          release_snapshot_b64="$(printf '%s\n' "$all_release_snapshots" | awk 'NF { print; exit }')"
           release_id=""
           if [[ -n "$release_snapshot_b64" ]]; then
             release_id="$(printf '%s' "$release_snapshot_b64" | base64 --decode | jq -r '.id // empty')"
