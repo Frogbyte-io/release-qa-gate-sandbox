@@ -13,8 +13,8 @@ on:
         description: Tested PR head SHA captured before app merge
         required: true
         type: string
-      reviewed_body_base64:
-        description: Base64 PR body captured immediately before app merge
+      notes_asset_id:
+        description: Candidate draft asset ID containing notes saved before app merge
         required: true
         type: string
 
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: 001148afa8b56bc6b214459633b421e53beb5fac
+          ref: 38384299e7e32459e65009f0e7b9ddb7b29df962
           path: .release-qa
           persist-credentials: false
       - name: Reevaluate and publish the tested candidate
