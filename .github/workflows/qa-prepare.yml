@@ -21,6 +21,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   invalidate:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -75,6 +76,7 @@ jobs:
           path: ${{ matrix.pattern }}
           if-no-files-found: error
   select:
+    if: github.ref == 'refs/heads/main'
     needs: package
     runs-on: ubuntu-24.04
     timeout-minutes: 15

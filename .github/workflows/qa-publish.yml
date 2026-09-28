@@ -1,0 +1,12 @@
+name: qa-publish
+on:
+  workflow_dispatch:
+permissions: {}
+jobs:
+  unavailable:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Block publication until Release QA Stage 4 is implemented
+        run: |
+          echo 'Sandbox publication is not implemented; selected candidates remain draft-only.' >&2
+          exit 1

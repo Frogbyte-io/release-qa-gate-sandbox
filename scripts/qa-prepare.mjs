@@ -11,7 +11,7 @@ const { GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: runId, GITHUB_RUN_ATTEMPT: attem
 const sha = /^[0-9a-f]{40}$/;
 const digest = /^[0-9a-f]{64}$/;
 const prNumber = Number(numberText);
-if (!/^\d+$/.test(numberText ?? '') || !Number.isSafeInteger(prNumber) || prNumber < 1 ||
+if (!/^[1-9]\d*$/.test(numberText ?? '') || String(prNumber) !== numberText || !Number.isSafeInteger(prNumber) ||
     !sha.test(sourceSha ?? '') || !sha.test(baseSha ?? '') || !digest.test(policyDigest ?? '') ||
     !sha.test(workflowHeadSha ?? '') || !/^\d+$/.test(runId ?? '') || !/^\d+$/.test(attempt ?? '')) {
   throw new Error('Invalid candidate preparation inputs');
@@ -21,7 +21,7 @@ const json = (...args) => JSON.parse(api(...args));
 const postJson = (endpoint, body) => JSON.parse(execFileSync('gh', ['api', '--method', 'POST', '--input', '-', endpoint], {
   input: JSON.stringify(body), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
 }));
-const list = (path) => api('--paginate', path, '--jq', '.[]').split(/\r?\n/).filter(Boolean).map(JSON.parse);
+const list = (path, projection = '.[]') => api('--paginate', path, '--jq', projection).split(/\r?\n/).filter(Boolean).map(JSON.parse);
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const path = (suffix) => `repos/${repo}/${suffix}`;
 const releaseName = `QA PR #${prNumber}`;
@@ -30,6 +30,12 @@ const candidateId = `cand-${runId}-${attempt}`;
 function assertCurrent() {
   const repository = json(`repos/${repo}`);
   const pr = json(path(`pulls/${prNumber}`));
+  if (process.env.GITHUB_REF !== `refs/heads/${repository.default_branch}` ||
+      workflowHeadSha !== json(path(`branches/${encodeURIComponent(repository.default_branch)}`)).commit.sha) {
+    throw new Error('Preparation must run at the trusted default-branch tip');
+  }
+  const project = JSON.parse(readFileSync('qa/project.json', 'utf8'));
+  if (pr.base.ref !== project.releaseBranch) throw new Error('PR does not target the configured release branch');
   if (pr.state !== 'open' || pr.head.repo.id !== repository.id || pr.base.repo.id !== repository.id ||
       pr.head.sha !== sourceSha) throw new Error('PR is closed, forked, or has changed source head');
   const tip = json(path(`branches/${encodeURIComponent(pr.base.ref)}`)).commit.sha;
@@ -82,7 +88,7 @@ function select() {
       run.event !== 'workflow_dispatch' || run.display_title !== `qa-prepare PR #${prNumber} ${sourceSha}`) {
     throw new Error('Wrong preparation workflow run or source binding');
   }
-  const actions = list(path(`actions/runs/${runId}/artifacts?per_page=100`));
+  const actions = list(path(`actions/runs/${runId}/artifacts?per_page=100`), '.artifacts[]');
   const artifacts = [];
   for (const [profile, suffix] of [['windows', '.exe'], ['linux', '.deb']]) {
     const action = actions.find((item) => item.name === `candidate-${profile}` && !item.expired);
