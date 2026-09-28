@@ -17,37 +17,61 @@ jobs:
   locate-candidate-release:
     name: locate-candidate-release
     runs-on: ubuntu-24.04
-    outputs:
-      release_id: ${{ steps.lookup.outputs.release_id }}
-      release_snapshot_b64: ${{ steps.lookup.outputs.release_snapshot_b64 }}
     permissions:
       contents: write
       pull-requests: read
     steps:
-      - name: Locate the draft candidate release
-        id: lookup
+      - name: Resolve release metadata and broker QA records
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if ! [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-            echo "Invalid pull request number" >&2
-            exit 1
-          fi
-          all_release_snapshots="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[] | select(.draft == true and .name == \"QA PR #$PR_NUMBER\")][0] | if . == null then empty else @base64 end")"
-          release_snapshot_b64="$(printf '%s\n' "$all_release_snapshots" | awk 'NF { print; exit }')"
-          release_id=""
-          if [[ -n "$release_snapshot_b64" ]]; then
-            release_id="$(printf '%s' "$release_snapshot_b64" | base64 --decode | jq -r '.id // empty')"
-            if ! [[ "$release_id" =~ ^[1-9][0-9]*$ ]]; then
-              echo "Invalid draft release id" >&2
-              exit 1
-            fi
-          fi
-          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
-          echo "release_snapshot_b64=$release_snapshot_b64" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import re
+          import subprocess
+
+          repository = os.environ['GITHUB_REPOSITORY']
+          pr_number = os.environ['PR_NUMBER']
+          if not re.fullmatch(r'[1-9][0-9]*', pr_number):
+              raise SystemExit('Invalid pull request number')
+
+          pages = json.loads(subprocess.check_output([
+              'gh', 'api', '--paginate', '--slurp',
+              f'repos/{repository}/releases?per_page=100',
+          ]))
+          releases = [release for page in pages for release in page]
+          release = next((item for item in releases if item.get('draft') is True and item.get('name') == f'QA PR #{pr_number}'), None)
+          if release is not None:
+              brokered_assets = {}
+              for asset in release.get('assets', []):
+                  name = asset.get('name', '')
+                  needed = (name == 'candidate.json' or name.startswith((
+                      'qa-report-', 'qa-event-', 'qa-evidence-', 'qa-claim-', 'qa-retry-resolution-'
+                  )) or re.match(r'^(qa-)?exception-', name))
+                  if not needed or asset.get('state') != 'uploaded':
+                      continue
+                  content = subprocess.check_output([
+                      'gh', 'api', '-H', 'Accept: application/octet-stream',
+                      f"repos/{repository}/releases/assets/{asset['id']}",
+                  ])
+                  brokered_assets[str(asset['id'])] = base64.b64encode(content).decode('ascii')
+              release['brokeredAssets'] = brokered_assets
+
+          os.makedirs('brokered-release', exist_ok=True)
+          with open('brokered-release/release.json', 'w', encoding='utf-8') as target:
+              json.dump(release or {}, target, separators=(',', ':'))
+          PY
+      - name: Upload brokered release snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-qa-broker-snapshot
+          path: brokered-release/release.json
+          if-no-files-found: error
 
   evaluate:
     name: trusted-evaluator
@@ -74,6 +98,11 @@ jobs:
           ref: 4dbbf81f3b49ca84860190e97ca4d177c57bde57
           path: .release-qa
           persist-credentials: false
+      - name: Download brokered release snapshot
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-qa-broker-snapshot
+          path: .release-qa-broker
       - name: Evaluate current PR and publish required status
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,6 +111,5 @@ jobs:
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          RELEASE_QA_RELEASE_ID: ${{ needs.locate-candidate-release.outputs.release_id }}
-          RELEASE_QA_RELEASE_SNAPSHOT_B64: ${{ needs.locate-candidate-release.outputs.release_snapshot_b64 }}
+          RELEASE_QA_RELEASE_SNAPSHOT_FILE: .release-qa-broker/release.json
         run: node --experimental-strip-types .release-qa/packages/qa/src/github/gate-cli.ts
