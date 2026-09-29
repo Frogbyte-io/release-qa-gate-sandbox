@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { packageName, releaseVersion } from './qa-source.mjs';
+import { candidateFileNames, releaseVersion } from './qa-source.mjs';
 
 const { GITHUB_REPOSITORY: repo, GITHUB_RUN_ID: runId, GITHUB_RUN_ATTEMPT: attempt,
   GITHUB_SHA: workflowHeadSha, PR_NUMBER: numberText, EXPECTED_HEAD: sourceSha,
@@ -94,7 +94,7 @@ function select() {
   const actions = list(path(`actions/runs/${runId}/artifacts?per_page=100`), '.artifacts[]');
   const artifacts = [];
   for (const profile of ['windows', 'linux']) {
-    const filename = packageName(profile, version);
+    const filenames = candidateFileNames(profile, version);
     const action = actions.find((item) => item.name === `candidate-${profile}` && !item.expired);
     if (!action) throw new Error(`Missing ${profile} Actions artifact`);
     const origin = json(path(`actions/artifacts/${action.id}`)).workflow_run;
@@ -103,13 +103,17 @@ function select() {
     }
     const directory = join('candidate-files', `candidate-${profile}`);
     const names = readdirSync(directory);
-    if (names.length !== 1 || names[0] !== filename) throw new Error(`Expected exact ${profile} package ${filename}`);
-    const name = `${candidateId}-${names[0]}`;
-    const file = join(directory, names[0]);
-    const sha256 = hash(readFileSync(file));
-    const asset = upload(release, name, file);
-    if (asset.state !== 'uploaded' || asset.name !== name || asset.digest !== `sha256:${sha256}`) throw new Error(`${profile} release asset digest differs`);
-    artifacts.push({ profile, name, sha256, assetId: asset.id, actionsArtifactId: action.id });
+    if (names.length !== filenames.length || filenames.some((filename) => !names.includes(filename))) {
+      throw new Error(`Expected exact ${profile} package files: ${filenames.join(', ')}`);
+    }
+    for (const filename of filenames) {
+      const name = `${candidateId}-${filename}`;
+      const file = join(directory, filename);
+      const sha256 = hash(readFileSync(file));
+      const asset = upload(release, name, file);
+      if (asset.state !== 'uploaded' || asset.name !== name || asset.digest !== `sha256:${sha256}`) throw new Error(`${profile} release asset digest differs`);
+      artifacts.push({ profile, name, sha256, assetId: asset.id, actionsArtifactId: action.id });
+    }
   }
   const tree = json(path(`git/commits/${sourceSha}`)).tree.sha;
   if (!sha.test(tree)) throw new Error('Source tree identity unavailable');

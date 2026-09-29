@@ -49,7 +49,9 @@ jobs:
           - os: windows-2025
             profile: windows
             command: package:windows
-            pattern: dist/Orbit-Orchard-*.exe
+            pattern: |
+              dist/Orbit-Orchard-*.exe
+              dist/Orbit-Orchard-*.exe.blockmap
           - os: ubuntu-24.04
             profile: linux
             command: package:linux
