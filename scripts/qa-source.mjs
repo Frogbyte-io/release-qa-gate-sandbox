@@ -13,3 +13,9 @@ export function packageName(profile, version) {
   if (profile === 'linux') return `Orbit-Orchard-${version}-linux-amd64.deb`;
   throw new Error(`Unknown release profile ${profile}`);
 }
+
+/** Exact files a package job must carry into the tested candidate. */
+export function candidateFileNames(profile, version) {
+  const installer = packageName(profile, version);
+  return profile === 'windows' ? [installer, `${installer}.blockmap`] : [installer];
+}

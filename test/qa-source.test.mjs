@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { packageName, releaseVersion } from '../scripts/qa-source.mjs';
+import { candidateFileNames, packageName, releaseVersion } from '../scripts/qa-source.mjs';
 
 test('matches the release marker to the packaged version', () => {
   assert.equal(releaseVersion('0.1.0\n', '{"version":"0.1.0"}'), '0.1.0');
@@ -18,4 +18,13 @@ test('accepts only the final package filenames for each profile', () => {
   // The live Linux CI build emits amd64 for its Debian package architecture.
   assert.equal(packageName('linux', configuration.version), fromTemplate('linux', 'amd64', 'deb'));
   assert.throws(() => packageName('macos', '0.1.0'), /Unknown release profile/);
+});
+
+test('the Windows candidate includes its exact updater blockmap', () => {
+  assert.deepEqual(candidateFileNames('windows', '0.1.1'), [
+    'Orbit-Orchard-0.1.1-win-x64.exe',
+    'Orbit-Orchard-0.1.1-win-x64.exe.blockmap',
+  ]);
+  assert.deepEqual(candidateFileNames('linux', '0.1.1'), ['Orbit-Orchard-0.1.1-linux-amd64.deb']);
+  assert.throws(() => candidateFileNames('macos', '0.1.1'), /Unknown release profile/);
 });
