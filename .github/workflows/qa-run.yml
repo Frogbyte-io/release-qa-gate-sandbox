@@ -1,0 +1,234 @@
+name: qa-run
+# Runs one Release QA suite of qa/project.json for the active candidate on a GitHub-hosted Linux runner (the project's
+# `workflows.run`). Today that is the `release` suite: the automated `linux/persistence` requirement, which unpacks the
+# candidate's verified .deb, plays a round of Orbit Orchard under Xvfb and checks that the best score survives a restart.
+# It is adapted from examples/tauri-smoke/.github/workflows/qa-run.yml of Frogbyte-io/release-qa.
+#
+# STATUS. This workflow has not yet been run on a GitHub runner. The suite itself, the lifecycle and the scenario were run
+# with the tool's `run` command on Ubuntu (WSL2, as root, with `--no-sandbox`) against the real 0.1.1 .deb from this
+# repository's release; the workflow's own steps (the apt packages, the chromedriver install, the artifact round trip
+# between the two jobs, the download of a draft release's asset and the upload by QA_SYNC_TOKEN) are written against
+# documented behaviour and have not been observed here.
+#
+# What the tool's commands do (packages/qa in Frogbyte-io/release-qa):
+#   download-candidate  fetches the candidate's file for the profile by release asset id, checks its SHA-256 against the
+#                       candidate record, and only then writes the local manifest `run --candidate` reads.
+#   sync-run            uploads the run's report, events and evidence to the candidate's draft release.
+#
+# IDENTITY. The merge gate counts an uploaded report only if its uploader is a user with write, maintain or admin access
+# to the repository AND is the report's own `actor` (loadCandidateProgress in packages/qa/src/github/sync.ts), and
+# `sync-run` itself needs `GET /user` to know who is uploading. The workflow's GITHUB_TOKEN is the `github-actions[bot]`
+# installation, not a user: it cannot answer `GET /user`, so `sync-run` refuses before uploading, and even an upload made
+# some other way would come from a bot that is not a collaborator, which the gate ignores. So `contents: write` on
+# GITHUB_TOKEN would not make a result count, and it is deliberately not granted. The sync job instead reads the
+# repository secret QA_SYNC_TOKEN, holding a token of a person (or machine user) who has write access to this repository.
+# The tool does not create, rotate or check that token. Results appear as uploaded by that user. Whether that token needs
+# the Actions "write" permission is also unproven: after the upload, `sync-run` asks for the `qa-reconcile.yml` workflow
+# to be dispatched, which GitHub only allows with it.
+#
+# Not proven: that GITHUB_TOKEN with `contents: read` can read the draft release's assets (draft releases are visible only
+# to people with push access; if the download step cannot see the release, that step needs `contents: write` and nothing
+# else changes); that the unpacked app starts on a runner (see the sandbox note on the Chromium sandbox below); that the
+# journal survives the artifact round trip between the two jobs.
+#
+# The dashboard dispatches it from the default branch with these inputs and finds the run again by its title, so
+# `run-name` must stay exactly this shape (see `remoteRunTitle` in packages/qa/src/github/remote-run.ts):
+#   qa-run PR #<pr_number> <candidate_id> <profile>/<suite> <expected_head>
+run-name: qa-run PR #${{ inputs.pr_number }} ${{ inputs.candidate_id }} ${{ inputs.profile }}/${{ inputs.suite }} ${{ inputs.expected_head }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request whose candidate is under test
+        required: true
+        type: string
+      candidate_id:
+        description: The active candidate the dashboard showed
+        required: true
+        type: string
+      profile:
+        description: Environment profile to run (a Linux profile of qa/project.json)
+        required: true
+        type: string
+      suite:
+        description: Suite of qa/project.json to run
+        required: true
+        type: string
+      expected_head:
+        description: Pull request head SHA the person reviewed
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One run per pull request, profile and suite, so two never race for the same journal. GitHub keeps only one pending run
+# per group: a third dispatch cancels the pending second, which the dashboard then lists as cancelled.
+concurrency:
+  group: qa-run-${{ github.repository }}-${{ inputs.pr_number }}-${{ inputs.profile }}-${{ inputs.suite }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # What the sync job needs to know: the exact tool commit this job used, and whether a journal exists to upload.
+    outputs:
+      tool_sha: ${{ steps.tool.outputs.sha }}
+      has_journal: ${{ steps.journal.outputs.has }}
+    # Reads only. The job runs the reviewed pull request's own test code, so it holds nothing that can write.
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      # Inputs go through the environment, never interpolated into script text. The token is not here: the job runs the
+      # reviewed pull request's own test code, which must not find it in its environment.
+      PR: ${{ inputs.pr_number }}
+      CANDIDATE: ${{ inputs.candidate_id }}
+      PROFILE: ${{ inputs.profile }}
+      SUITE: ${{ inputs.suite }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+    steps:
+      - name: Validate inputs and re-check what the dashboard saw
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$PR" =~ ^[1-9][0-9]*$ ]] || { echo "pr_number must be a positive integer"; exit 1; }
+          [[ "$EXPECTED_HEAD" =~ ^[0-9a-f]{40}$ ]] || { echo "expected_head must be a full SHA"; exit 1; }
+          for value in "$CANDIDATE" "$PROFILE" "$SUITE"; do
+            [[ "$value" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || { echo "unsafe input: $value"; exit 1; }
+          done
+          head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq .head.sha)
+          [ "$head" = "$EXPECTED_HEAD" ] || { echo "PR head is now $head, not $EXPECTED_HEAD"; exit 1; }
+
+      # The tool itself, pinned to a reviewed commit of Frogbyte-io/release-qa. Move the pin by reviewing and committing
+      # a new SHA here. It is checked out next to the subject, which is where qa/app.mjs looks for it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          ref: ee8f7060b9e2f70e66534939f91c5052425b97d8
+          path: release-qa
+          persist-credentials: false
+      - name: Record the tool commit, so the sync job runs exactly the same code
+        id: tool
+        run: echo "sha=$(git -C release-qa rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # The tests and app under test, at exactly the head that was reviewed. The suite imports only the tool's code, so
+      # the sandbox's own `npm ci` is not needed.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ inputs.expected_head }}
+          path: subject
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: release-qa/.node-version
+      - run: npm ci
+        working-directory: release-qa
+
+      # Electron's runtime libraries (the list Release QA's Electron guide uses for Ubuntu 24.04) and a virtual display.
+      - name: Install the desktop libraries Electron needs, and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libnss3 libasound2t64 libgbm1 libxss1 libxtst6 libatk-bridge2.0-0t64 \
+            libcups2t64 libdrm2 libxkbcommon0 libxdamage1 libxrandr2 libpango-1.0-0
+
+      # The ChromeDriver that drives the app must be built for the app's own Electron release: the `electron-chromedriver`
+      # package at the same version as the `electron` the pull request packages. The version is read from the pull
+      # request's package.json as data and must look like a plain version, since it is passed to npm.
+      - name: Install the ChromeDriver for the app's Electron release
+        run: |
+          version=$(node -p "require('./subject/package.json').devDependencies.electron")
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected electron version: $version"; exit 1; }
+          npm install --prefix "$RUNNER_TEMP/chromedriver" "electron-chromedriver@$version" --no-audit --no-fund
+          echo "RELEASE_QA_CHROMEDRIVER=$RUNNER_TEMP/chromedriver/node_modules/electron-chromedriver/bin/chromedriver" >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/chromedriver/node_modules/electron-chromedriver/bin/chromedriver" --version
+
+      # Runs the tool from the trusted checkout, before any of the pull request's code has executed. The token is read-only
+      # and exists only for this step. Nothing usable is written unless the file's SHA-256 matches the candidate record.
+      - name: Download and verify the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node release-qa/packages/qa/src/cli/main.ts download-candidate \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$EXPECTED_HEAD" --candidate "$CANDIDATE" \
+            --profile "$PROFILE" --out "$RUNNER_TEMP/candidate" --json
+
+      # RELEASE_QA_ELECTRON_NO_SANDBOX: the unpacked .deb has no setuid chrome-sandbox and Ubuntu 24.04 restricts
+      # unprivileged user namespaces, so Chromium's sandbox cannot start; the app runs unsandboxed on this disposable
+      # runner only (see qa/lifecycle.mjs). Whether the app starts without it was not measured.
+      - name: Run the suite under a virtual display
+        env:
+          RELEASE_QA_ELECTRON_NO_SANDBOX: '1'
+          RELEASE_QA_TOOL: ${{ github.workspace }}/release-qa
+        run: |
+          node release-qa/packages/qa/src/cli/main.ts designate --root "$RUNNER_TEMP/qa-root"
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" \
+            node release-qa/packages/qa/src/cli/main.ts run \
+              --project subject/qa/project.json \
+              --candidate "$RUNNER_TEMP/candidate/candidate.json" \
+              --profile "$PROFILE" --suite "$SUITE" \
+              --root "$RUNNER_TEMP/qa-root" --state "$RUNNER_TEMP/qa-runs" --json
+
+      - name: Note whether the run left a journal
+        id: journal
+        if: ${{ !cancelled() }}
+        run: |
+          if compgen -G "$RUNNER_TEMP/qa-runs/run-*" > /dev/null; then echo "has=true" >> "$GITHUB_OUTPUT"; else echo "has=false" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Keep the raw run journal
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-run-${{ inputs.profile }}-${{ inputs.suite }}
+          path: ${{ runner.temp }}/qa-runs
+          if-no-files-found: warn
+
+  # A separate job, so the token of a user never shares a runner with the pull request's test code, which has already run
+  # in the job above. It still trusts the journal that job produced (the pull request's tests decide their own outcomes),
+  # which is why an uploaded report is evidence for a reviewer and not proof.
+  sync:
+    needs: run
+    # Only when the run left a journal. A scenario failure does (and still syncs); a job that failed earlier, such as
+    # validation or the download, did not, and its own failure is the one to read, not a missing-artifact error here.
+    if: ${{ !cancelled() && needs.run.outputs.has_journal == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # GITHUB_TOKEN reads only; the upload is made with QA_SYNC_TOKEN, see IDENTITY in the header.
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      PR: ${{ inputs.pr_number }}
+      CANDIDATE: ${{ inputs.candidate_id }}
+      EXPECTED_HEAD: ${{ inputs.expected_head }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          # The exact commit the run job used, not a moving branch: this job holds a user's token.
+          ref: ${{ needs.run.outputs.tool_sha }}
+          path: release-qa
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: release-qa/.node-version
+      - run: npm ci
+        working-directory: release-qa
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: qa-run-${{ inputs.profile }}-${{ inputs.suite }}
+          path: ${{ runner.temp }}/qa-runs
+
+      # sync-run validates every argument itself, refuses unless the pull request is still at the reviewed head and the
+      # candidate is still the active one, and exits non-zero on any failure, so a run that did not sync shows as failed.
+      - name: Sync the report to the candidate
+        env:
+          GH_TOKEN: ${{ secrets.QA_SYNC_TOKEN }}
+        run: |
+          runs=("$RUNNER_TEMP"/qa-runs/run-*/)
+          [ "${#runs[@]}" -eq 1 ] && [ -d "${runs[0]}" ] || { echo "expected exactly one run in the journal artifact" >&2; exit 1; }
+          run_id=$(basename "${runs[0]}")
+          node release-qa/packages/qa/src/cli/main.ts sync-run \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$EXPECTED_HEAD" --candidate "$CANDIDATE" \
+            --run "$run_id" --state "$RUNNER_TEMP/qa-runs" --json

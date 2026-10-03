@@ -2,5 +2,5 @@
   "releaseBranchPrefix": "release/",
   "releaseLabel": "release",
   "releaseFiles": ["VERSION"],
-  "required": ["windows/persistence", "windows/device-feel"]
+  "required": ["windows/persistence", "windows/device-feel", "linux/persistence"]
 }
