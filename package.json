@@ -1,11 +1,13 @@
 {
   "name": "orbit-orchard",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "A tiny packaged arcade game for Release QA candidate integration",
   "author": "Frogbyte",
   "main": "app/main.cjs",
-  "engines": { "node": ">=22.18.0" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "scripts": {
     "start": "electron .",
     "test": "node --test",
@@ -20,11 +22,26 @@
     "appId": "io.frogbyte.orbit-orchard",
     "productName": "Orbit Orchard",
     "asar": true,
-    "files": ["app/**/*", "package.json"],
-    "directories": { "output": "dist" },
+    "files": [
+      "app/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
     "artifactName": "Orbit-Orchard-${version}-${os}-${arch}.${ext}",
-    "win": { "target": "nsis", "signAndEditExecutable": false },
-    "nsis": { "oneClick": false, "perMachine": false },
-    "linux": { "target": "deb", "category": "Game", "maintainer": "Release QA Sandbox <noreply@example.com>" }
+    "win": {
+      "target": "nsis",
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false
+    },
+    "linux": {
+      "target": "deb",
+      "category": "Game",
+      "maintainer": "Release QA Sandbox <noreply@example.com>"
+    }
   }
 }
