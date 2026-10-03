@@ -8,11 +8,12 @@
   ],
   "requirements": [
     { "key": "windows/persistence", "mode": "manual", "title": "Best score survives app restart", "capabilities": ["display"] },
-    { "key": "windows/device-feel", "mode": "manual", "title": "Packaged game plays smoothly", "capabilities": ["display"] }
+    { "key": "windows/device-feel", "mode": "manual", "title": "Packaged game plays smoothly", "capabilities": ["display"] },
+    { "key": "linux/persistence", "mode": "automated", "title": "Best score survives app restart", "capabilities": ["display"] }
   ],
-  "suites": [],
-  "scenarioFiles": [],
-  "lifecycleModule": "qa/lifecycle.mjs",
-  "workflows": { "prepare": "qa-prepare.yml", "gate": "qa-gate.yml", "publish": "qa-publish.yml" },
+  "suites": [{ "id": "release", "requirements": ["linux/persistence"] }],
+  "scenarioFiles": ["persistence.spec.mjs"],
+  "lifecycleModule": "lifecycle.mjs",
+  "workflows": { "prepare": "qa-prepare.yml", "gate": "qa-gate.yml", "publish": "qa-publish.yml", "run": "qa-run.yml" },
   "markers": { "releaseNotes": "release-notes", "qa": "release-qa" }
 }
