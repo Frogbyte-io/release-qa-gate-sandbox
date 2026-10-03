@@ -38,11 +38,11 @@ async function launch(ctx) {
 }
 
 async function cleanup(ctx) {
-  const running = app.session;
+  // Only once the app is gone: a profile removed under a running app is being written to. The session is forgotten only
+  // after it closed, so a failed close leaves it for another attempt; the run also owns the app's process and directory
+  // and stops and removes them itself.
+  await app.session?.close();
   app.session = undefined;
-  // Only once the app is gone: a profile removed under a running app is being written to. If close fails, the run
-  // owns the directory and removes it when it stops the app.
-  await running?.close();
   await removeData(ctx);
 }
 

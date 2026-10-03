@@ -14,7 +14,11 @@ const EXPECTED_BEST = 6;
 
 /** An element's text, or undefined if it cannot be read yet (e.g. the page is still loading after a restart). */
 async function text(selector) {
-  return (await session().browser.$(selector)).getText().catch(() => undefined);
+  try {
+    return await (await session().browser.$(selector)).getText();
+  } catch {
+    return undefined;
+  }
 }
 
 const shows = (ctx, selector, expected, description) =>
@@ -65,7 +69,11 @@ export const scenarios = [
         await persistence(ctx);
       } catch (error) {
         // What was on screen and in the console when it went wrong; best effort, since the session may be the problem.
-        await session().captureFailureEvidence(ctx, 'failure').catch(() => undefined);
+        try {
+          await session().captureFailureEvidence(ctx, 'failure');
+        } catch {
+          // Never in place of the failure being reported.
+        }
         throw error;
       }
     },

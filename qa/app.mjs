@@ -37,9 +37,14 @@ export const removeData = (ctx) => rm(dataDir(ctx), { recursive: true, force: tr
 /** Runs a command as a process the run owns, and waits for it; a non-zero exit is an error naming the command. */
 export async function runToEnd(ctx, label, command, args) {
   const child = await ctx.spawn(label, command, args, { stdio: 'ignore', windowsHide: true });
-  const ended = await new Promise((resolveExit) => {
+  // `ctx.spawn` already rejects when the process cannot start; an error after that (one that comes without an exit)
+  // must not leave this waiting forever either.
+  const ended = await new Promise((resolveExit, rejectExit) => {
     if (child.exitCode !== null || child.signalCode !== null) resolveExit(child.exitCode ?? `signal ${child.signalCode}`);
-    else child.once('exit', (exitCode, signal) => resolveExit(exitCode ?? `signal ${signal}`));
+    else {
+      child.once('exit', (exitCode, signal) => resolveExit(exitCode ?? `signal ${signal}`));
+      child.once('error', (error) => rejectExit(new Error(`${label} (${command}) failed: ${error.message}`)));
+    }
   });
   if (ended !== 0) throw new Error(`${label} (${command}) exited with ${ended}`);
 }

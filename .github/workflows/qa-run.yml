@@ -26,15 +26,19 @@ name: qa-run
 # the Actions "write" permission is also unproven: after the upload, `sync-run` asks for the `qa-reconcile.yml` workflow
 # to be dispatched, which GitHub only allows with it.
 #
-# Not proven: that GITHUB_TOKEN with `contents: read` can read the draft release's assets (draft releases are visible only
-# to people with push access; if the download step cannot see the release, that step needs `contents: write` and nothing
-# else changes); that the unpacked app starts on a runner (see the sandbox note on the Chromium sandbox below); that the
-# journal survives the artifact round trip between the two jobs.
+# DRAFT RELEASE. The candidate's files are assets of a draft release, which GitHub shows only to tokens with push access,
+# so a `contents: read` GITHUB_TOKEN cannot download them. The `download` job therefore holds `contents: write`, but it
+# runs only the pinned tool and never checks out the pull request; it hands the verified file to the `run` job as an
+# artifact of this workflow run, and the `run` job, which executes the pull request's test code, stays read-only.
+#
+# Not proven: that the unpacked app starts on a runner (see the note on the Chromium sandbox below); that the files
+# survive the artifact round trips between the jobs.
 #
 # The dashboard dispatches it from the default branch with these inputs and finds the run again by its title, so
 # `run-name` must stay exactly this shape (see `remoteRunTitle` in packages/qa/src/github/remote-run.ts):
 #   qa-run PR #<pr_number> <candidate_id> <profile>/<suite> <expected_head>
-run-name: qa-run PR #${{ inputs.pr_number }} ${{ inputs.candidate_id }} ${{ inputs.profile }}/${{ inputs.suite }} ${{ inputs.expected_head }}
+# Quoted: unquoted, YAML would read everything from ` #` on as a comment.
+run-name: "qa-run PR #${{ inputs.pr_number }} ${{ inputs.candidate_id }} ${{ inputs.profile }}/${{ inputs.suite }} ${{ inputs.expected_head }}"
 
 on:
   workflow_dispatch:
@@ -70,20 +74,18 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  run:
+  # Fetches and verifies the candidate. It needs `contents: write` only because the candidate is a draft release's asset
+  # (see DRAFT RELEASE in the header), so it runs nothing but the pinned tool: the pull request is never checked out here.
+  download:
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    # What the sync job needs to know: the exact tool commit this job used, and whether a journal exists to upload.
+    timeout-minutes: 15
     outputs:
       tool_sha: ${{ steps.tool.outputs.sha }}
-      has_journal: ${{ steps.journal.outputs.has }}
-    # Reads only. The job runs the reviewed pull request's own test code, so it holds nothing that can write.
     permissions:
-      contents: read
+      contents: write
       pull-requests: read
     env:
-      # Inputs go through the environment, never interpolated into script text. The token is not here: the job runs the
-      # reviewed pull request's own test code, which must not find it in its environment.
+      # Inputs go through the environment, never interpolated into script text.
       PR: ${{ inputs.pr_number }}
       CANDIDATE: ${{ inputs.candidate_id }}
       PROFILE: ${{ inputs.profile }}
@@ -103,16 +105,60 @@ jobs:
           [ "$head" = "$EXPECTED_HEAD" ] || { echo "PR head is now $head, not $EXPECTED_HEAD"; exit 1; }
 
       # The tool itself, pinned to a reviewed commit of Frogbyte-io/release-qa. Move the pin by reviewing and committing
-      # a new SHA here. It is checked out next to the subject, which is where qa/app.mjs looks for it.
+      # a new SHA here; the other jobs check out exactly the commit this job records.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
           ref: ee8f7060b9e2f70e66534939f91c5052425b97d8
           path: release-qa
           persist-credentials: false
-      - name: Record the tool commit, so the sync job runs exactly the same code
+      - name: Record the tool commit, so the other jobs run exactly the same code
         id: tool
         run: echo "sha=$(git -C release-qa rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: release-qa/.node-version
+      - run: npm ci
+        working-directory: release-qa
+
+      # Nothing usable is written unless the file's SHA-256 matches the candidate record.
+      - name: Download and verify the candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node release-qa/packages/qa/src/cli/main.ts download-candidate \
+            --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$EXPECTED_HEAD" --candidate "$CANDIDATE" \
+            --profile "$PROFILE" --out "$RUNNER_TEMP/candidate" --json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qa-candidate-${{ inputs.profile }}-${{ inputs.suite }}
+          path: ${{ runner.temp }}/candidate
+          if-no-files-found: error
+          overwrite: true
+
+  run:
+    needs: download
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # What the sync job needs to know: whether a journal exists to upload.
+    outputs:
+      has_journal: ${{ steps.journal.outputs.has }}
+    # Reads only. The job runs the reviewed pull request's own test code, so it holds nothing that can write.
+    permissions:
+      contents: read
+    env:
+      # The token is not here: the job runs the reviewed pull request's own test code, which must not find it.
+      PROFILE: ${{ inputs.profile }}
+      SUITE: ${{ inputs.suite }}
+    steps:
+      # The tool at exactly the commit the download job used. It is checked out next to the subject, which is where
+      # qa/app.mjs looks for it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: Frogbyte-io/release-qa
+          ref: ${{ needs.download.outputs.tool_sha }}
+          path: release-qa
+          persist-credentials: false
       # The tests and app under test, at exactly the head that was reviewed. The suite imports only the tool's code, so
       # the sandbox's own `npm ci` is not needed.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -125,6 +171,25 @@ jobs:
           node-version-file: release-qa/.node-version
       - run: npm ci
         working-directory: release-qa
+
+      # The verified candidate from the download job, checked again here before any of the pull request's code runs.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: qa-candidate-${{ inputs.profile }}-${{ inputs.suite }}
+          path: ${{ runner.temp }}/candidate
+      - name: Re-check the candidate file against its manifest
+        working-directory: ${{ runner.temp }}/candidate
+        run: |
+          node -e '
+            const { createHash } = require("node:crypto");
+            const { readFileSync } = require("node:fs");
+            const { artifacts } = JSON.parse(readFileSync("candidate.json", "utf8"));
+            if (artifacts.length !== 1 || artifacts[0].profile !== process.env.PROFILE) throw new Error("unexpected candidate manifest");
+            const [file] = artifacts;
+            const actual = createHash("sha256").update(readFileSync(file.path)).digest("hex");
+            if (actual !== file.sha256) throw new Error(`${file.path} changed after it was verified`);
+            console.log(`${file.path} ${actual}`);
+          '
 
       # Electron's runtime libraries (the list Release QA's Electron guide uses for Ubuntu 24.04) and a virtual display.
       - name: Install the desktop libraries Electron needs, and a virtual display
@@ -143,16 +208,6 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/chromedriver" "electron-chromedriver@$version" --no-audit --no-fund
           echo "RELEASE_QA_CHROMEDRIVER=$RUNNER_TEMP/chromedriver/node_modules/electron-chromedriver/bin/chromedriver" >> "$GITHUB_ENV"
           "$RUNNER_TEMP/chromedriver/node_modules/electron-chromedriver/bin/chromedriver" --version
-
-      # Runs the tool from the trusted checkout, before any of the pull request's code has executed. The token is read-only
-      # and exists only for this step. Nothing usable is written unless the file's SHA-256 matches the candidate record.
-      - name: Download and verify the candidate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          node release-qa/packages/qa/src/cli/main.ts download-candidate \
-            --repo "$GITHUB_REPOSITORY" --pr "$PR" --head "$EXPECTED_HEAD" --candidate "$CANDIDATE" \
-            --profile "$PROFILE" --out "$RUNNER_TEMP/candidate" --json
 
       # RELEASE_QA_ELECTRON_NO_SANDBOX: the unpacked .deb has no setuid chrome-sandbox and Ubuntu 24.04 restricts
       # unprivileged user namespaces, so Chromium's sandbox cannot start; the app runs unsandboxed on this disposable
@@ -183,12 +238,14 @@ jobs:
           name: qa-run-${{ inputs.profile }}-${{ inputs.suite }}
           path: ${{ runner.temp }}/qa-runs
           if-no-files-found: warn
+          # A re-run of this job replaces the journal of the attempt before it instead of failing on the existing name.
+          overwrite: true
 
   # A separate job, so the token of a user never shares a runner with the pull request's test code, which has already run
   # in the job above. It still trusts the journal that job produced (the pull request's tests decide their own outcomes),
   # which is why an uploaded report is evidence for a reviewer and not proof.
   sync:
-    needs: run
+    needs: [download, run]
     # Only when the run left a journal. A scenario failure does (and still syncs); a job that failed earlier, such as
     # validation or the download, did not, and its own failure is the one to read, not a missing-artifact error here.
     if: ${{ !cancelled() && needs.run.outputs.has_journal == 'true' }}
@@ -206,8 +263,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          # The exact commit the run job used, not a moving branch: this job holds a user's token.
-          ref: ${{ needs.run.outputs.tool_sha }}
+          # The exact commit the other jobs used, not a moving branch: this job holds a user's token.
+          ref: ${{ needs.download.outputs.tool_sha }}
           path: release-qa
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
