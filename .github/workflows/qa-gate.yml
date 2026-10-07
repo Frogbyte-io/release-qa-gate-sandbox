@@ -95,7 +95,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: c94e528a7e2e2ffbb50c5192703c27fc2d955469
+          ref: 74a9299701c576ad2b4f2b66cca46f97c8a42347
           path: .release-qa
           persist-credentials: false
       - name: Download brokered release snapshot
@@ -141,7 +141,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: Frogbyte-io/release-qa
-          ref: c94e528a7e2e2ffbb50c5192703c27fc2d955469
+          ref: 74a9299701c576ad2b4f2b66cca46f97c8a42347
           path: .release-qa
           persist-credentials: false
       - name: Download deferred evaluator result
